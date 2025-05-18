@@ -62,12 +62,12 @@ def build_genre_matrix(user_tokens):
     real_user_ids = list(genre_counts.keys())
 
     if real_user_ids:
-        for i in range(25):
+        for i in range(26):
             base_user_id = np.random.choice(real_user_ids)
             base_vector = pd.Series(genre_counts[base_user_id]).fillna(0)
             noisy_vector = base_vector + np.random.randint(-2, 3, size=base_vector.shape)
             noisy_vector = noisy_vector.clip(lower=0)
-            genre_counts[f'Virtual User{i+1}'] = noisy_vector.to_dict()
+            genre_counts[f'Virtual User {i+1}'] = noisy_vector.to_dict()
     else:
         print('No real users')
 
@@ -106,7 +106,7 @@ def analyze_users():
     for i in range(len(user_ids)):
         for j in range(i + 1, len(user_ids)):
             sim = similarity_matrix[i][j]
-            if sim > 0.8:
+            if sim > 0.6:
                 G.add_edge(user_ids[i], user_ids[j], weight=sim)
 
     centrality = nx.degree_centrality(G)

@@ -87,7 +87,7 @@ def analyze_users():
     genre_df = build_genre_matrix(users)
     normalized = pd.DataFrame(StandardScaler().fit_transform(genre_df), columns=genre_df.columns, index=genre_df.index)
     z_scores = np.abs(zscore(normalized))
-    outliers = (z_scores > 5.5).any(axis=1)
+    outliers = (z_scores > 3.5).any(axis=1)
 
     cleaned = normalized[~outliers].copy()
     print(f'Remaining users after outlier filtering: {len(cleaned)}')
@@ -134,9 +134,9 @@ def analyze_users():
     print('Top Genres per Cluster:')
     for cluster_id, group in original_genres.groupby('cluster'):
         top_genres = group.drop(columns='cluster').sum().sort_values(ascending=False).head(5)
-        genre_list = [f"{genre} ({int(count)} plays)" for genre, count in top_genres.items()]
+        genre_list = [f'{genre} ({int(count)} plays)' for genre, count in top_genres.items()]
         genre_string = ", ".join(genre_list)
-        print(f"Cluster {cluster_id}: {genre_string}\n")
+        print(f'Cluster {cluster_id}: {genre_string}\n')
 
     print('Top 5 Genres for Each Real User:')
     for user_id in genre_df.index:
@@ -223,7 +223,7 @@ def analyze_users():
     centrality_user_graph = nx.degree_centrality(G_user)
     nx.set_node_attributes(G_user, centrality_user_graph, 'centrality')
     node_sizes = [centrality_user_graph.get(n, 0) * 2000 for n in G_user.nodes]
-    node_colors = ["orange" if not n.startswith("Virtual") else "skyblue"
+    node_colors = ['orange' if not n.startswith('Virtual') else 'skyblue'
         for n in G_user.nodes()]
 
     plt.figure(figsize=(12, 8))

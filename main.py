@@ -14,6 +14,7 @@ import seaborn as sns
 import networkx as nx
 from dotenv import load_dotenv
 from auth import refresh_access_token
+from collections import defaultdict
 
 load_dotenv('db.env')
 DB_URL = os.getenv('DATABASE_URL')
@@ -62,17 +63,17 @@ def build_genre_matrix(user_tokens):
     real_user_ids = list(genre_counts.keys())
 
     if real_user_ids:
-        for i in range(26):
+        for i in range(95):
             base_user_id = np.random.choice(real_user_ids)
             base_vector = pd.Series(genre_counts[base_user_id]).fillna(0)
-            noisy_vector = base_vector + np.random.randint(-2, 3, size=base_vector.shape)
-            noisy_vector = noisy_vector.clip(lower=0)
+            noise = np.random.normal(0, 0.5, size=base_vector.shape)
+            noisy_vector = (base_vector + noise).round().clip(lower=0)
+    
             genre_counts[f'Virtual User {i+1}'] = noisy_vector.to_dict()
-    else:
-        print('No real users')
+        else:
+            print('No real users')
 
     return pd.DataFrame.from_dict(genre_counts, orient='index').fillna(0)
-
 
 def analyze_users():
     users = get_users()
@@ -84,19 +85,12 @@ def analyze_users():
     for user_id, _ in users:
         print(f'- {user_id}')
     genre_df = build_genre_matrix(users)
-    print('Raw genre matrix shape:', genre_df.shape)
-
     normalized = pd.DataFrame(StandardScaler().fit_transform(genre_df), columns=genre_df.columns, index=genre_df.index)
     z_scores = np.abs(zscore(normalized))
     outliers = (z_scores > 5.5).any(axis=1)
-    print(f'Users removed as outliers ({outliers.sum()}):')
-    print(normalized[outliers].index.tolist())
 
     cleaned = normalized[~outliers].copy()
     print(f'Remaining users after outlier filtering: {len(cleaned)}')
-    if cleaned.empty:
-        print('No users remaining after outlier filtering.')
-        return
 
     similarity_matrix = 1 - cosine_distances(cleaned)
     G = nx.Graph()
@@ -106,7 +100,7 @@ def analyze_users():
     for i in range(len(user_ids)):
         for j in range(i + 1, len(user_ids)):
             sim = similarity_matrix[i][j]
-            if sim > 0.6:
+            if sim > 0.3:
                 G.add_edge(user_ids[i], user_ids[j], weight=sim)
 
     centrality = nx.degree_centrality(G)
@@ -140,9 +134,18 @@ def analyze_users():
     print('Top Genres per Cluster:')
     for cluster_id, group in original_genres.groupby('cluster'):
         top_genres = group.drop(columns='cluster').sum().sort_values(ascending=False).head(5)
-        print(f'Cluster {cluster_id}:')
-        for genre, count in top_genres.items():
-            print(f'   {genre}: {int(count)} plays')
+        genre_list = [f"{genre} ({int(count)} plays)" for genre, count in top_genres.items()]
+        genre_string = ", ".join(genre_list)
+        print(f"Cluster {cluster_id}: {genre_string}\n")
+
+    print('Top 5 Genres for Each Real User:')
+    for user_id in genre_df.index:
+        if not user_id.startswith('Virtual') and user_id in cleaned.index:
+            top_genres = genre_df.loc[user_id].sort_values(ascending=False).head(5)
+            genre_list = [f"{genre} ({int(count)} plays)" for genre, count in top_genres.items()]
+            genre_string = ", ".join(genre_list)
+            print(f'{user_id}:') 
+            print(f'{genre_string}\n')
 
     cleaned.to_csv('genre_network_results.csv')
 
@@ -156,6 +159,7 @@ def analyze_users():
 
     G_force = nx.Graph()
     genre_popularity = {}
+    genre_connections = defaultdict(set)
 
     for user in original_genres.index:
         for genre, count in original_genres.loc[user].items():
@@ -163,24 +167,30 @@ def analyze_users():
                 continue
             G_force.add_edge(user, genre, weight=int(count))
             genre_popularity[genre] = genre_popularity.get(genre, 0) + int(count)
+            genre_connections[genre].add(user)
 
-    node_sizes = [
-        400 if n in cleaned.index else 100 + genre_popularity.get(n, 1) * 3 for n in G_force.nodes()]
+    node_sizes = []
+    for n in G_force.nodes():
+        if n in cleaned.index:  
+            node_sizes.append(400)
+        elif n in genre_connections: 
+            size = 100 + len(genre_connections[n]) * 50  
+            node_sizes.append(size)
+        else:
+            node_sizes.append(100)  
 
     node_colors = []
     for n in G_force.nodes():
         if n in cleaned.index:
             if n.startswith('Virtual'):
-                node_colors.append('skyblue')   
+                node_colors.append('skyblue')
             else:
-                node_colors.append('orange')   
+                node_colors.append('orange')
         else:
-            node_colors.append('lightgreen') 
+            node_colors.append('lightgreen')
 
     plt.figure(figsize=(14, 10))
     pos = nx.spring_layout(G_force, seed=42, k=0.4)
-
-# Draw nodes and edges
     nx.draw_networkx_nodes(G_force, pos, node_size=node_sizes, node_color=node_colors, alpha=0.85)
     nx.draw_networkx_edges(G_force, pos, width=[G_force[u][v]['weight'] * 0.2 for u, v in G_force.edges()], alpha=0.4)
 
@@ -198,5 +208,46 @@ def analyze_users():
     plt.tight_layout()
     plt.show()
 
+    similarity_threshold = 0.3
+    G_user = nx.Graph()
+    user_ids = cleaned.index.tolist()
+    G_user.add_nodes_from(user_ids)
+
+    for i in range(len(user_ids)):
+        for j in range(i + 1, len(user_ids)):
+            sim = similarity_matrix[i][j]
+            if sim > similarity_threshold:
+                G_user.add_edge(user_ids[i], user_ids[j], weight=sim)
+
+
+    centrality_user_graph = nx.degree_centrality(G_user)
+    nx.set_node_attributes(G_user, centrality_user_graph, 'centrality')
+    node_sizes = [centrality_user_graph.get(n, 0) * 2000 for n in G_user.nodes]
+    node_colors = ["orange" if not n.startswith("Virtual") else "skyblue"
+        for n in G_user.nodes()]
+
+    plt.figure(figsize=(12, 8))
+    pos = nx.spring_layout(G_user, seed=42, k=0.4)
+    nx.draw_networkx_nodes(G_user, pos, node_size=node_sizes, node_color=node_colors, alpha=0.85)
+    nx.draw_networkx_edges(G_user, pos, width=[G_user[u][v]['weight'] * 2 for u, v in G_user.edges()], alpha=0.4)
+    labels = {n: n for n in G_user.nodes() if not n.startswith('Virtual')}
+    
+    nx.draw_networkx_labels(G_user, pos, labels=labels, font_size=8)
+    plt.title('User Similarity Network (Real = Orange, Virtual = Skyblue)')
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+    genre_user_counts = {genre: len(users) for genre, users in genre_connections.items()}
+    top5_genres_all_users = sorted(genre_user_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    genres, user_counts = zip(*top5_genres_all_users)
+
+    plt.figure(figsize=(8, 5))
+    sns.barplot(x=user_counts, y=genres, color='steelblue')
+    plt.xlabel('Number of Users Connected')
+    plt.ylabel('Genre')
+    plt.title('Top 5 Genres Connected to the Most Users')
+    plt.tight_layout()
+    plt.show()
 if __name__ == '__main__':
     analyze_users()

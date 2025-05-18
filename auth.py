@@ -19,7 +19,6 @@ app = Flask(__name__)
 def get_db_connection():
     return psycopg2.connect(os.getenv('DATABASE_URL'), cursor_factory=RealDictCursor)
 
-
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
